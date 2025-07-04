@@ -10,6 +10,9 @@ def init_db():
         CREATE TABLE IF NOT EXISTS comments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             content TEXT,
+            author TEXT,
+            date TEXT,
+            likes INTEGER,
             video_url TEXT
         )
     """)
@@ -30,17 +33,18 @@ def init_db():
 
 
 def save_comments(comments: list[dict]):
-    """
-    comments: [{'content': '...', 'video_url': '...'}, ...]
-    """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    data = [(c["content"], c["video_url"]) for c in comments]
-    cursor.executemany("INSERT INTO comments (content, video_url) VALUES (?, ?)", data)
+    data = [(c["content"], c["author"], c["date"], c["likes"], c["video_url"]) for c in comments]
+    cursor.executemany("""
+        INSERT INTO comments (content, author, date, likes, video_url)
+        VALUES (?, ?, ?, ?, ?)
+    """, data)
 
     conn.commit()
     conn.close()
+
 
 
 def save_video_urls(videos: list[dict]):
@@ -72,7 +76,7 @@ def save_video_urls(videos: list[dict]):
 def get_video_urls() -> list[str]:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT url FROM video_urls")
+    cursor.execute("SELECT url FROM video_urls order by id ASC")
     urls = [row[0] for row in cursor.fetchall()]
     conn.close()
     print(urls)

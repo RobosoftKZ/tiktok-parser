@@ -1,5 +1,4 @@
 import asyncio
-import re
 from datetime import datetime, timedelta
 
 from manager import manager  # это твой PlaywrightManager
@@ -74,7 +73,9 @@ async def get_all_video_urls(username: str) -> list[dict]:
     await page.close()
     return results
 
+
 import re
+
 
 async def get_video_metrics(page) -> dict:
     def extract_number(text):
@@ -98,7 +99,6 @@ async def get_video_metrics(page) -> dict:
 
     return metrics
 
-
 async def get_comments(video_url: str) -> list[dict]:
     print(f"🌐 Открываем страницу: {video_url}")
     page = await manager.get_page()
@@ -109,6 +109,9 @@ async def get_comments(video_url: str) -> list[dict]:
 
         print("📊 Извлекаем метрики видео...")
         metrics = await get_video_metrics(page)
+        if metrics["comments"] == 0:
+            print("0 комментариев")
+            return []
         print(f"🎯 Метрики: {metrics}")
         target_count = int(metrics["comments"] * 0.9)
         print(f"🧮 Цель: собрать {target_count} комментариев")
@@ -118,6 +121,7 @@ async def get_comments(video_url: str) -> list[dict]:
         print("✅ Комментарии появились на странице")
 
         comments = []
+        seen_texts = set()
         prev_count = 0
         iteration = 0
 
@@ -126,43 +130,71 @@ async def get_comments(video_url: str) -> list[dict]:
             print(f"🔁 Скролл #{iteration}...")
 
             await page.mouse.wheel(0, 1000)
-            await asyncio.sleep(1)
+            await asyncio.sleep(5)
 
             # 🕐 Ждём возможный лоадер
             try:
                 print("⏳ Проверка наличия лоадера...")
-                await page.wait_for_selector("div.eps6g9r0", timeout=5000)  # замените селектор на актуальный для вашего лоадера
+                await page.wait_for_selector("div.eps6g9r0", timeout=5000)
                 print("⏳ Лоадер найден, ждём завершения загрузки...")
-                await page.wait_for_selector("div.eps6g9r0", state="hidden", timeout=10000000)
+                await page.wait_for_selector("div.eps6g9r0", state="hidden", timeout=10000)
                 print("✅ Лоадер исчез")
             except Exception:
                 print("⚠️ Лоадер не найден — продолжаем")
 
-            # 🔎 Парсим комментарии
             print("🔎 Ищем элементы комментариев...")
             elements = await page.query_selector_all('div.css-13wx63w-DivCommentObjectWrapper')
             print(f"🔍 Найдено элементов: {len(elements)}")
 
-            new_comments = []
             for el in elements:
                 try:
-                    text_el = await el.query_selector('p[data-e2e^="comment-level-"]')
-                    if text_el:
-                        text = await text_el.inner_text()
-                        if text:
-                            new_comments.append({"content": text.strip(), "video_url": video_url})
+                    # 💬 Текст комментария
+                    text_el = await el.query_selector('span[data-e2e^="comment-level-"] p')
+                    text = (await text_el.inner_text()).strip() if text_el else None
+                    if not text or text in seen_texts:
+                        continue
+                    seen_texts.add(text)
+
+                    # 👤 Автор
+                    author_el = await el.query_selector('div[data-e2e^="comment-username-"] a p')
+                    author = (await author_el.inner_text()).strip() if author_el else None
+
+                    # 🕒 Дата
+                    date = None
+                    try:
+                        date_span_elements = await el.query_selector_all(
+                            'div.css-1lglotn-DivCommentSubContentWrapper span')
+                        if date_span_elements:
+                            date = (await date_span_elements[0].inner_text()).strip()
+                    except Exception as date_err:
+                        print(f"⚠️ Ошибка при извлечении даты: {date_err}")
+
+                    # ❤️ Лайки
+                    like_el = await el.query_selector('div.edeod5e0 span')
+                    likes = (await like_el.inner_text()).strip() if like_el else "0"
+
+                    comments.append({
+                        "content": text,
+                        "author": author,
+                        "date": date,
+                        "likes": likes,
+                        "video_url": video_url,
+                    })
+
                 except Exception as el_err:
                     print(f"⚠️ Ошибка при парсинге комментария: {el_err}")
-                    continue
 
-            print(f"💬 Собрано комментариев: {len(new_comments)} / {metrics['comments']}")
+            print(f"💬 Собрано комментариев: {len(comments)} / {metrics['comments']}")
 
-            # Выход по условию
-            if len(new_comments) >= target_count or len(new_comments) == prev_count:
-                print("🚪 Условие выхода достигнуто")
+            # ✅ Условие выхода
+            current_count = len(comments)
+            if current_count >= target_count:
+                print("🎯 Цель достигнута — достаточно комментариев")
                 break
-
-            prev_count = len(new_comments)
+            if current_count == prev_count:
+                print("⚠️ Количество не увеличилось — возможно достигнут конец")
+                break
+            prev_count = current_count
 
     except Exception as e:
         print(f"❌ Ошибка при получении комментариев для {video_url}: {e}")

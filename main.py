@@ -31,7 +31,7 @@ async def etl():
                 raw = await get_comments(url)
                 print(f"🗃️  Комментариев: {len(raw)}")
                 cleaned = clean_comments(raw)
-                save_comments(cleaned)
+                save_comments(raw)
             except Exception as e:
                 print(f"❌ Ошибка: {e}")
 

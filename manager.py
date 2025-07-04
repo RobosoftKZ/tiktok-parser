@@ -69,35 +69,46 @@ class PlaywrightManager:
                 self.context = await self.browser.new_context()
                 page = await self.context.new_page()
 
-            # Объединённый обработчик запроса
+            # Прокси-функция для обработки CAPTCHA и блокировки ресурсов
             async def block_unwanted_and_handle_captcha(route, request):
                 url = request.url
                 resource_type = request.resource_type
 
-                # Проверка на CAPTCHA
-                if "captcha.vendors" in url:
-                    print("🛑 CAPTCHA-ресурс обнаружен: ", url)
+                # Обнаружение CAPTCHA загрузки (типичная для TikTok)
+                if "core-captcha" in url or "ibyteimg.com" in url:
+                    print(f"🧩 CAPTCHA компонент загружен: {url}")
+                    print("⏸ Ожидание ручного решения CAPTCHA...")
 
-                    # Ожидаем появления CAPTCHA в DOM
+                    # Пробуем получить DOM с картинкой или контейнером CAPTCHA
                     try:
-                        await asyncio.sleep(1000000)
-                        # await request.frame.page.wait_for_selector("iframe[src*='recaptcha']", timeout=10000)
+                        # Таймер, чтобы пользователь успел решить
+                        await asyncio.sleep(1)  # пауза до появления DOM
+                        await request.frame.page.wait_for_selector(".captcha-verify-container", timeout=15000)
+                        print("🛑 CAPTCHA DOM обнаружен (slider/image).")
                     except Exception:
-                        print("⚠️ CAPTCHA iframe не найден за 10 секунд")
+                        print("⚠️ CAPTCHA DOM не обнаружен за 15 сек")
 
-                    print("⏸ Пауза для решения CAPTCHA вручную...")
-                    # input("🔐 Нажмите Enter после решения CAPTCHA в браузере...")
+                    # Если нашли изображение — выводим URL
+                    try:
+                        captcha_img = await request.frame.page.query_selector("img")
+                        if captcha_img:
+                            src = await captcha_img.get_attribute("src")
+                            print("🖼 CAPTCHA image URL:", src)
+                    except Exception:
+                        pass
 
-                # Блокируем ненужные ресурсы
+                    # Долгая пауза для ручного решения
+                    await asyncio.sleep(600)  # или используйте input()
+
+                # Блок ненужных ресурсов
                 if resource_type in ["image", "media", "font"]:
-                    if "recaptcha" in url or "gstatic.com/recaptcha" in url:
+                    if "recaptcha" in url or "gstatic.com" in url:
                         await route.continue_()
                     else:
                         await route.abort()
                 else:
                     await route.continue_()
 
-            # Применяем роутинг ко всем запросам
             await page.route("**/*", block_unwanted_and_handle_captcha)
 
             return page
