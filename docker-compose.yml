@@ -1,0 +1,8 @@
+version: '3.8'
+
+services:
+  etl:
+    build: .
+    container_name: tiktok_etl
+    volumes:
+      - .:/app
